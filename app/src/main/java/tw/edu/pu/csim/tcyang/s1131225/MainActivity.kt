@@ -1,16 +1,12 @@
+// MainActivity.kt （保持乾淨，只放啟動畫面）
 package tw.edu.pu.csim.tcyang.s1131225
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
 import tw.edu.pu.csim.tcyang.s1131225.ui.theme.S1131225Theme
 
 class MainActivity : ComponentActivity() {
@@ -19,32 +15,21 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             S1131225Theme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Greeting(
-                        name = "Android",
-                        modifier = Modifier
-                            .padding(innerPadding)
-                            .fillMaxSize()
-                    )
-                }
+                ExamApp()
             }
         }
     }
 }
 
 @Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "Hello $name!",
-        modifier = Modifier
-            .fillMaxSize()
-            .wrapContentSize(Alignment.TopStart)
-    )
+fun ExamApp() {
+    ExamScreen()
 }
+
 @Preview(showBackground = true)
 @Composable
-fun GreetingPreview() {
+fun ExamPreview() {
     S1131225Theme {
-        Greeting("Android")
+        ExamApp()
     }
 }

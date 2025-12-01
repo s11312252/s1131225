@@ -62,6 +62,7 @@ class ExamViewModel : ViewModel() {
         _iconXOffsetDp.value = 0f
     }
 
+
     fun dropIcon() {
         if (_screenHeight.value == 0) return
 

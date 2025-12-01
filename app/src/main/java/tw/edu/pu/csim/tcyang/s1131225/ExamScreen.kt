@@ -1,13 +1,11 @@
 package tw.edu.pu.csim.tcyang.s1131225
-
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -17,21 +15,14 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.delay
 import androidx.compose.ui.unit.Density
 
-// --- 輔助 Data Class (不變) ---
 data class Rect(val left: Float, val top: Float, val right: Float, val bottom: Float)
-
-data class RoleBoundsPx(
-    val name: String,
-    val rect: Rect
-)
 
 fun checkCollision(falling: Rect, target: Rect): Boolean {
     return falling.left < target.right &&
@@ -39,145 +30,142 @@ fun checkCollision(falling: Rect, target: Rect): Boolean {
             falling.top < target.bottom &&
             falling.bottom > target.top
 }
-// ------------------------------------------
 
 @Composable
 fun ExamScreen(modifier: Modifier = Modifier, viewModel: ExamViewModel = viewModel()) {
 
     val configuration = LocalConfiguration.current
     val density = LocalDensity.current
-    val currentDensity = density.density // <-- 獲取原始密度值
+    val currentDensity = density.density
+    val screenWidthPx = (configuration.screenWidthDp * currentDensity).toInt()
+    val screenHeightPx = (configuration.screenHeightDp * currentDensity).toInt()
 
-    val currentWidthPx = (configuration.screenWidthDp * currentDensity).toInt()
-    val currentHeightPx = (configuration.screenHeightDp * currentDensity).toInt()
-
-    // ... (其他狀態讀取) ...
-    val screenWidthPxState = viewModel.screenWidth.collectAsState().value
-    val screenHeightPxState = viewModel.screenHeight.collectAsState().value
-
-    val iconYPositionPx = viewModel.iconYPositionPx.collectAsState().value
-    val iconXOffsetDp = viewModel.iconXOffsetDp.collectAsState().value
-    val fallingIconResId = viewModel.serviceIconResId.collectAsState().value
-    val collisionMessageState = viewModel.collisionMessage.collectAsState().value
-
-    // *** 修正點：傳遞 density 參數 ***
-    LaunchedEffect(currentWidthPx, currentHeightPx) {
-        viewModel.updateScreenSize(currentWidthPx, currentHeightPx, currentDensity)
+    LaunchedEffect(screenWidthPx, screenHeightPx) {
+        viewModel.updateScreenSize(screenWidthPx, screenHeightPx, currentDensity)
     }
+
+    val iconYPos by viewModel.iconYPositionPx.collectAsState()
+    val iconXOffset by viewModel.iconXOffsetDp.collectAsState()
+    val fallingIcon by viewModel.serviceIconResId.collectAsState()
+    val currentScore by viewModel.score.collectAsState()
 
     val iconSizePx = 300f
     val iconSizeDp = with(density) { iconSizePx.toDp() }
-    val screenHeightDp = configuration.screenHeightDp.dp
-    val verticalOffsetDp = (screenHeightDp / 2) - (iconSizeDp / 2)
-    val iconYPositionDp = with(density) { iconYPositionPx.toDp() }
+    val halfScreenDp = with(density) { (screenHeightPx / 2f).toDp() }
 
+    // 自動掉落 coroutine (碰撞邏輯)
+    LaunchedEffect(Unit) {
+        while(true) {
+            delay(50)
+            val currentTop = iconYPos
+            val currentIconXOffsetPx = iconXOffset * currentDensity
+
+            // 服務圖示邊界
+            val currentTopLeftXPx = (screenWidthPx / 2f) + currentIconXOffsetPx - (iconSizePx / 2f)
+            val fallingRect = Rect(
+                left = currentTopLeftXPx,
+                top = currentTop,
+                right = currentTopLeftXPx + iconSizePx,
+                bottom = currentTop + iconSizePx
+            )
+
+            // 固定角色邊界 (根據最新的圖示位置計算)
+            val verticalOffsetTopPx = (screenHeightPx/2f) - iconSizePx
+
+            val roles = listOf(
+                "嬰幼兒圖示" to Rect(0f, verticalOffsetTopPx, iconSizePx, verticalOffsetTopPx + iconSizePx),
+                "兒童圖示" to Rect(screenWidthPx - iconSizePx, verticalOffsetTopPx, screenWidthPx.toFloat(), verticalOffsetTopPx + iconSizePx),
+                "成人圖示" to Rect(0f, screenHeightPx - iconSizePx, iconSizePx, screenHeightPx.toFloat()),
+                "一般民眾圖示" to Rect(screenWidthPx - iconSizePx, screenHeightPx - iconSizePx, screenWidthPx.toFloat(), screenHeightPx.toFloat())
+            )
+
+            var collided = false
+            for ((name, rect) in roles) {
+                if(checkCollision(fallingRect, rect)) {
+                    viewModel.addScore()
+                    viewModel.resetIconPosition()
+                    collided = true
+                    break
+                }
+            }
+
+            // 掉到底部
+            if(!collided && fallingRect.bottom >= screenHeightPx) {
+                viewModel.subtractScore()
+                viewModel.resetIconPosition()
+                collided = true
+            }
+
+            if(!collided) {
+                viewModel.dropIcon()
+            }
+        }
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = Color(0xFFFFFF00)
     ) { innerPadding ->
 
-        // --- 服務圖示動畫計時器與碰撞檢查 (邏輯不變) ---
-        LaunchedEffect(Unit) {
-            val bottomPaddingPx = with(density) { innerPadding.calculateBottomPadding().toPx() }
+        Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
 
-            while (true) {
-                kotlinx.coroutines.delay(100)
-
-                val currentWidth = viewModel.screenWidth.value
-                val currentHeight = viewModel.screenHeight.value
-
-                if (currentHeight <= 0 || currentWidth <= 0) {
-                    viewModel.dropIcon()
-                    continue
-                }
-
-                // Px 值計算
-                val currentIconXOffsetPx = iconXOffsetDp * currentDensity
-                val currentIconYPositionPx = viewModel.iconYPositionPx.value
-                val verticalOffsetPx = (currentHeight / 2f) - (iconSizePx / 2f)
-
-                // 服務圖示邊界
-                val currentTopLeftXPx = (currentWidth / 2f) + currentIconXOffsetPx - (iconSizePx / 2f)
-                val currentFallingBounds = Rect(
-                    left = currentTopLeftXPx,
-                    top = currentIconYPositionPx,
-                    right = currentTopLeftXPx + iconSizePx,
-                    bottom = currentIconYPositionPx + iconSizePx
-                )
-
-                // 固定圖示邊界
-                val roleIconsBounds = listOf(
-                    RoleBoundsPx("嬰幼兒圖示", Rect(0f, verticalOffsetPx, iconSizePx, verticalOffsetPx + iconSizePx)),
-                    RoleBoundsPx("兒童圖示", Rect(currentWidth - iconSizePx, verticalOffsetPx, currentWidth.toFloat(), verticalOffsetPx + iconSizePx)),
-                    RoleBoundsPx("成人圖示", Rect(0f, currentHeight - bottomPaddingPx - iconSizePx, iconSizePx, currentHeight - bottomPaddingPx)),
-                    RoleBoundsPx("一般民眾圖示", Rect(currentWidth - iconSizePx, currentHeight - bottomPaddingPx - iconSizePx, currentWidth.toFloat(), currentHeight - bottomPaddingPx))
-                )
-
-                var collisionDetected = false
-
-                for (role in roleIconsBounds) {
-                    if (checkCollision(currentFallingBounds, role.rect)) {
-                        viewModel.setCollisionMessage("碰撞${role.name}")
-                        viewModel.resetIconPosition()
-                        collisionDetected = true
-                        break
-                    }
-                }
-
-                val bottomCollisionBoundaryPx = currentHeight - bottomPaddingPx
-                if (!collisionDetected && (currentFallingBounds.bottom) >= bottomCollisionBoundaryPx) {
-                    viewModel.setCollisionMessage("(掉到最下方)")
-                    viewModel.resetIconPosition()
-                    collisionDetected = true
-                }
-
-                if (!collisionDetected) {
-                    viewModel.dropIcon()
-                }
-            }
-        }
-
-        // 6. UI 佈局 (不變)
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-
-            // ======== 隨機服務圖示 (掉落與拖曳) ========
+            // 服務圖示
             Image(
-                painter = painterResource(id = fallingIconResId),
-                contentDescription = "隨機服務圖示",
+                painter = painterResource(id = fallingIcon),
+                contentDescription = "服務圖示",
                 modifier = Modifier
                     .size(iconSizeDp)
-                    .align(Alignment.TopCenter) // 錨點在上方中央
-                    .offset(
-                        x = iconXOffsetDp.dp, // 這裡會使用隨機的起始 Offset
-                        y = iconYPositionDp
-                    )
+                    .align(Alignment.TopCenter)
+                    .offset(x = iconXOffset.dp, y = with(density){iconYPos.toDp()})
                     .pointerInput(Unit) {
-                        detectDragGestures(
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                viewModel.updateXOffset(
-                                    dragAmount.x,
-                                    currentDensity,
-                                    currentWidthPx
-                                )
-                            }
-                        )
+                        detectDragGestures { change, dragAmount ->
+                            change.consume()
+                            viewModel.updateXOffset(dragAmount.x, currentDensity, screenWidthPx)
+                        }
                     }
             )
 
-            // ... (角色圖示不變) ...
-            Image(painter = painterResource(id = R.drawable.role0), contentDescription = "嬰幼兒圖示", modifier = Modifier.size(iconSizeDp).align(Alignment.TopStart).offset(y = verticalOffsetDp))
-            Image(painter = painterResource(id = R.drawable.role1), contentDescription = "兒童圖示", modifier = Modifier.size(iconSizeDp).align(Alignment.TopEnd).offset(y = verticalOffsetDp))
-            Image(painter = painterResource(id = R.drawable.role2), contentDescription = "成人圖示", modifier = Modifier.size(iconSizeDp).align(Alignment.BottomStart))
-            Image(painter = painterResource(id = R.drawable.role3), contentDescription = "一般民眾圖示", modifier = Modifier.size(iconSizeDp).align(Alignment.BottomEnd))
+            // 角色圖示
 
+            // 嬰幼兒（左上）
+            Image(
+                painter = painterResource(id = R.drawable.role0),
+                contentDescription = "嬰幼兒圖示",
+                modifier = Modifier
+                    .size(iconSizeDp)
+                    .align(Alignment.TopStart)
+                    .offset(y = halfScreenDp - iconSizeDp)
+            )
 
-            // ======== 畫面內容 (中央資訊) ========
+            // 兒童（右上）
+            Image(
+                painter = painterResource(id = R.drawable.role1),
+                contentDescription = "兒童圖示",
+                modifier = Modifier
+                    .size(iconSizeDp)
+                    .align(Alignment.TopEnd)
+                    .offset(y = halfScreenDp - iconSizeDp)
+            )
+
+            // 成人（左下）
+            Image(
+                painter = painterResource(id = R.drawable.role2),
+                contentDescription = "成人圖示",
+                modifier = Modifier
+                    .size(iconSizeDp)
+                    .align(Alignment.BottomStart)
+            )
+
+            // 一般民眾（右下）
+            Image(
+                painter = painterResource(id = R.drawable.role3),
+                contentDescription = "一般民眾圖示",
+                modifier = Modifier
+                    .size(iconSizeDp)
+                    .align(Alignment.BottomEnd)
+            )
+
+            // 中央 Happy 圖示與文字 (修正 Image 區塊)
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -187,10 +175,10 @@ fun ExamScreen(modifier: Modifier = Modifier, viewModel: ExamViewModel = viewMod
 
                 Image(
                     painter = painterResource(id = R.drawable.happy),
-                    contentDescription = "快樂圖示",
+                    contentDescription = "快樂圖示", // *** 修正點：加入 contentDescription ***
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
-                        .size(iconSizeDp)
+                        .size(120.dp)
                         .clip(CircleShape)
                 )
 
@@ -200,27 +188,27 @@ fun ExamScreen(modifier: Modifier = Modifier, viewModel: ExamViewModel = viewMod
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("瑪利亞基金會大考驗", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Text("作者：資管2B 陳芯霈", fontSize = 18.sp)
+                    Text("瑞科亞東會展服務大樓", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text("作者：黃三B 楊子慶", fontSize = 18.sp)
+                    Text("螢幕大小：${screenWidthPx} * ${screenHeightPx}", fontSize = 16.sp)
 
-                    Text("螢幕大小：${screenWidthPxState} * ${screenHeightPxState}", fontSize = 16.sp)
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "成績：100分",
-                            fontSize = 16.sp,
-                            color = Color.Red,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            " $collisionMessageState",
-                            fontSize = 16.sp,
-                            color = Color.Black,
-                            fontWeight = FontWeight.Normal
-                        )
-                    }
+                    // 顯示動態分數
+                    Text(
+                        "成績：${currentScore}分",
+                        fontSize = 16.sp,
+                        color = Color.Red,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
+
+            // 底部尺寸資訊
+            Text(
+                text = "寬度：${screenWidthPx} px\n高度：${screenHeightPx} px",
+                fontSize = 14.sp,
+                color = Color.Black,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
+            )
         }
     }
 }
